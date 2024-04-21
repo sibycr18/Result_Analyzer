@@ -37,35 +37,39 @@ exam_name = col1.text_input("Enter exam name:", placeholder="eg: Series1")
 # Place the upload button in the first column
 uploaded_file = col2.file_uploader("Upload csv file:", type="csv")
 
-if uploaded_file is not None:
+# Add a button to upload the details
+upload_button = st.button("Upload")
+
+if upload_button:
     if not exam_name:
         st.warning("Please enter the name of the exam being added...")
-    # Read the CSV file
-    csv_data = csv.reader(uploaded_file.getvalue().decode('utf-8').splitlines())
-    # Skipping college name in the csv file
-    next(csv_data)
-    # Column names
-    columns = next(csv_data)
-    columns_with_datatypes = []
-    for col in columns:
-        if clean(col) == 'AdmnNo':
-            columns_with_datatypes.append('AdmnNo TEXT PRIMARY KEY')
-        else:
-            columns_with_datatypes.append(f'{clean(col)} TEXT')
-    # Create the table if it doesn't exist
-    table_name = clean(exam_name)
-    cur.execute(f'''CREATE TABLE IF NOT EXISTS {table_name} ({', '.join([col for col in columns_with_datatypes])})''')
-    # Insert the data into the table
-    for row in csv_data:
-        # Replace "-" with None in each value of the row
-        row = [None if value == "-" else value for value in row]
-        try:
-            cur.execute(f"INSERT INTO {table_name} VALUES ({', '.join(['?' for _ in row])})", row)
-        except sqlite3.IntegrityError:
-            st.warning(f"Record with Admission Number {row[0]} already exists in the database.")
-            break
-    conn.commit()
-    st.success(f"CSV data has been uploaded and inserted into the '{table_name}' table.")
+        if uploaded_file is not None:
+            # Read the CSV file
+            csv_data = csv.reader(uploaded_file.getvalue().decode('utf-8').splitlines())
+            # Skipping college name in the csv file
+            next(csv_data)
+            # Column names
+            columns = next(csv_data)
+            columns_with_datatypes = []
+            for col in columns:
+                if clean(col) == 'AdmnNo':
+                    columns_with_datatypes.append('AdmnNo TEXT PRIMARY KEY')
+                else:
+                    columns_with_datatypes.append(f'{clean(col)} TEXT')
+            # Create the table if it doesn't exist
+            table_name = clean(exam_name)
+            cur.execute(f'''CREATE TABLE IF NOT EXISTS {table_name} ({', '.join([col for col in columns_with_datatypes])})''')
+            # Insert the data into the table
+            for row in csv_data:
+                # Replace "-" with None in each value of the row
+                row = [None if value == "-" else value for value in row]
+                try:
+                    cur.execute(f"INSERT INTO {table_name} VALUES ({', '.join(['?' for _ in row])})", row)
+                except sqlite3.IntegrityError:
+                    st.warning(f"Record with Admission Number {row[0]} already exists in the database.")
+                    break
+            conn.commit()
+            st.success(f"CSV data has been uploaded and inserted into the '{table_name}' table.")
 
 
 st.subheader("", divider="gray")
@@ -91,7 +95,7 @@ class_name = col4.selectbox("Select a class:", [_class[0] for _class in class_na
 # Generate button
 if st.button("Generate", ):
     # Perform analysis based on the selected exam and class
-    st.write(f"Analyzing data for exam '{exam_name}' and class '{class_name}'...")
+    st.info(f"Analyzing data for exam '{exam_name}' and class '{class_name}'...")
 
     query = f"""
     SELECT Code FROM Subjects WHERE Class='{class_name}'
@@ -101,14 +105,16 @@ if st.button("Generate", ):
     subjects = [subject[0] for subject in subjects]
 
     results = []
+    faculty = []
     for subject in subjects:
         result = [subject]
+
         query = f"""
-                SELECT COUNT(*) FROM {exam_name} WHERE {subject} NOT NULL
+                SELECT NAME FROM Subjects WHERE CODE = '{subject}'
                 """
         cur.execute(query)
-        total = list(cur.fetchall())[0][0]
-        result.append(total)
+        subject_name = list(cur.fetchall())[0][0]
+        result.append(subject_name)
 
         query = f"""
                 SELECT COUNT(*) FROM {exam_name} WHERE {subject}>=20 AND {subject} NOT NULL
@@ -117,28 +123,33 @@ if st.button("Generate", ):
         passed = list(cur.fetchall())[0][0]
         result.append(passed)
 
+        query = f"""
+                SELECT COUNT(*) FROM {exam_name} WHERE {subject}<=20 AND {subject} NOT NULL
+                """
+        cur.execute(query)
+        failed = list(cur.fetchall())[0][0]
+        result.append(failed)
+
+        query = f"""
+                SELECT FACULTY FROM Subjects WHERE CODE = '{subject}' AND Class = '{class_name}'
+                """
+        cur.execute(query)
+        faculty.append(list(cur.fetchall())[0][0])
+
         results.append(result)
 
-    # # Fetch data from SQLite
-    # query = f"""
-    # SELECT DISTINCT * FROM {exam_name}, Students
-    # WHERE {exam_name}.UniversityRegNo = Students.UniversityRegNo
-    # AND Students.Class = '{class_name}'
-    # """
-    # cur.execute(query)
-    # # print(cur.description)
-    # results = cur.fetchall()
 
     # Convert data to DataFrame
-    df = pd.DataFrame(results, columns=['Subject', 'Total', 'Passed'])
-    df['Pass Percentage'] = (df['Passed'] / df['Total']) * 100
+    df = pd.DataFrame(results, columns=['Subject Code', 'Subject Name', 'Passed', 'Failed'])
+    df['Pass Percentage'] = (df['Passed'] / (df['Passed'] + df['Failed'])) * 100
+    df['Name of Faculty'] = faculty
 
     # Display table
     st.write("Pass Percentage of Each Subject:")
-    st.write(df)
+    st.dataframe(df, hide_index=True)
 
     # # Create pie chart
-    # fig = px.pie(df, values='Pass Percentage', names='Subject', title='Pass Percentage of Each Subject')
+    # fig = px.pie(df, values='Pass Percentage', names='Subject Code', title='Pass Percentage of Each Subject')
     # st.plotly_chart(fig)
 
 
